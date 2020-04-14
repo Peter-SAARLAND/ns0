@@ -102,10 +102,28 @@ class NS0:
             if "ttl" in self.records[record]:
                 ttl = self.records[record]["ttl"]
 
+            # Check difference between update_interval and ttl
+            # If update_interval is close to ttl (or higher), ns0 gets locked
+            # in a DELETE/CREATE loop
+            treshhold = 5
+            update_interval = ttl = self.config.resolve("ns0:update_interval")
+
+            # Examples:
+            # ttl: 10
+            # update_interval: 10
+            # treshhold: 5
+            #
+            # ttl: 10
+            # update_interval: 60
+            # treshhold: 55
+            if update_interval >= ttl:
+                treshhold = treshhold + (update_interval - ttl)
+
             # If TTL is 0, we don't expire the record
             if (
                 ttl != 0
-                and int((now - self.records[record]["found"]).total_seconds()) >= ttl
+                and int((now - self.records[record]["found"]).total_seconds())
+                >= ttl + treshhold
             ):
                 # Record is over its TTL
                 logger.warning("Record {} expired".format(record))
