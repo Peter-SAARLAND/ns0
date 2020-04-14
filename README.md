@@ -50,7 +50,7 @@ TOTAL                    38      0   100%
 # Get Started
 
 ## Run ns0
-`docker run registry.gitlab.com/peter.saarland/ns0:latest`
+`docker run -v /var/run/docker.sock:/var/run/docker.sock registry.gitlab.com/peter.saarland/ns0:latest`
 
 Environment-Variables:
 

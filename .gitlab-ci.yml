@@ -1,0 +1,110 @@
+stages:
+    - fetch-version
+    - build
+    - test
+    - release
+  fetch-semantic-version:
+    # Requires Node >= 10.13 version
+    image: node:13
+    stage: fetch-version
+    only:
+      refs:
+      - master
+      - alpha
+      - /^(([0-9]+)\.)?([0-9]+)\.x/ # This matches maintenance branches
+      - /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+)?$/ # This matches pre-releases
+    script:
+      - npm install @semantic-release/gitlab @semantic-release/exec
+      - npx semantic-release --generate-notes false --dry-run
+    artifacts:
+      paths:
+      - VERSION.txt
+  generate-non-semantic-version:
+    stage: fetch-version
+    except:
+      refs:
+      - master
+      - alpha
+      - /^(([0-9]+)\.)?([0-9]+)\.x/ # This matches maintenance branches
+      - /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+)?$/ # This matches pre-releases
+    script:
+      - echo build-$CI_PIPELINE_ID > VERSION.txt
+    artifacts:
+      paths:
+      - VERSION.txt
+  build:
+    stage: build
+    image: docker:19.03.6
+    variables:
+      DOCKER_BUILDKIT: 1
+      # For Container Scanning
+      IMAGE_TAG: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA
+    services:
+      - docker:19.03.6-dind
+    script:
+      - echo "$CI_JOB_TOKEN" | docker login $CI_REGISTRY --username=gitlab-ci-token --password-stdin
+      - export BASE_IMAGE=$(grep -oE 'FROM .+$' Dockerfile | head -n 1 | cut -d ' ' -f 2)
+      - docker pull $CI_REGISTRY_IMAGE:latest || true
+      - docker pull $BASE_IMAGE
+      - docker build --cache-from $CI_REGISTRY_IMAGE:latest,$BASE_IMAGE --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t $IMAGE_TAG -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA -f Dockerfile .
+      - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+      - docker push $IMAGE_TAG
+
+  include:
+    - template: Container-Scanning.gitlab-ci.yml
+
+  release:
+    image: node:13
+    stage: release
+    only:
+      refs:
+      - master
+      - alpha
+      # This matches maintenance branches
+      - /^(([0-9]+)\.)?([0-9]+)\.x/
+      # This matches pre-releases
+      - /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+)?$/
+    script:
+      - npm install @semantic-release/gitlab @semantic-release/exec
+      - npx semantic-release
+
+  release image:
+    stage: release
+    image: docker:19.03.6
+    services:
+      - docker:19.03.6-dind
+    variables:
+
+    script:
+      - export RELEASE_VERSION=$(<VERSION.txt)
+      - echo "$CI_JOB_TOKEN" | docker login $CI_REGISTRY --username=gitlab-ci-token --password-stdin
+      - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA || true
+      - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA $CI_REGISTRY_IMAGE:latest
+      - docker push $CI_REGISTRY_IMAGE:latest
+      - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA $CI_REGISTRY_IMAGE:v$RELEASE_VERSION
+      - docker push $CI_REGISTRY_IMAGE:v$RELEASE_VERSION
+    only:
+      - master
+
+  release dockerhub:
+    stage: release
+    image: docker:19.03.6
+    services:
+      - docker:19.03.6-dind
+    variables:
+      REGISTRY_USER: ${DOCKER_HUB_USER}
+      REGISTRY_PASSWORD: ${DOCKER_HUB_PASSWORD}
+      REGISTRY: docker.io
+      REGISTRY_IMAGE: index.docker.io/derfabianpeter/${CI_PROJECT_NAME}
+    script:
+      - export RELEASE_VERSION=$(<VERSION.txt)
+      - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY --username=${CI_REGISTRY_USER} --password-stdin
+      - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA || true
+      # Log in to Docker Hub
+      - echo "$REGISTRY_PASSWORD" | docker login $REGISTRY --username=${REGISTRY_USER} --password-stdin
+      - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA $REGISTRY_IMAGE:latest
+      - docker push $REGISTRY_IMAGE:latest
+      - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA $REGISTRY_IMAGE:v$RELEASE_VERSION
+      - docker push $REGISTRY_IMAGE:v$RELEASE_VERSION
+    only:
+      - master
