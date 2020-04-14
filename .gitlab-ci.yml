@@ -19,6 +19,7 @@ fetch-semantic-version:
   artifacts:
     paths:
     - VERSION.txt
+
 generate-non-semantic-version:
   stage: fetch-version
   except:
@@ -32,6 +33,7 @@ generate-non-semantic-version:
   artifacts:
     paths:
     - VERSION.txt
+
 build:
   stage: build
   image: docker:19.03.6
