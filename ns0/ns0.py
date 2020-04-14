@@ -106,7 +106,7 @@ class NS0:
             # If update_interval is close to ttl (or higher), ns0 gets locked
             # in a DELETE/CREATE loop
             treshhold = 5
-            update_interval = ttl = self.config.resolve("ns0:update_interval")
+            update_interval = self.config.resolve("ns0:update_interval")
 
             # Examples:
             # ttl: 10
