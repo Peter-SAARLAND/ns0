@@ -1,0 +1,10 @@
+coverage
+logzero
+pycodestyle
+pylint
+flake8
+python-coveralls
+docker[tls]
+dns-lexicon[full]
+dnspython
+tldextract
