@@ -4,7 +4,7 @@ plugins:
     - - "@semantic-release/exec"
       - verifyReleaseCmd: "echo ${nextRelease.version} > VERSION.txt"
     - "@semantic-release/gitlab"
-    branches:
+branches:
     - "master"
     - "+([0-9])?(.{+([0-9]),x}).x"
     - name: "alpha"

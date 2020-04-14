@@ -1,14 +1,4 @@
-# Python 3 Boiler Plate
-
-Simple Python boiler plate project. Main features:
-
-* Main application with parameter parsing and logger (via decorator).
-* Dynamic tests via unit tests and test coverage.
-* Static tests via pycodestyle, pyflakes, and pyline.
-* Requirements management.
-* Basic make, .gitignore and other configuration files.
-
-[![Build Status](https://github.com/alexanderwillner/python-boilerplate/workflows/Build-Test/badge.svg)](https://github.com/AlexanderWillner/python-boilerplate/actions) [![Build Status](https://travis-ci.org/AlexanderWillner/python-boilerplate.svg?branch=master)](https://travis-ci.org/AlexanderWillner/python-boilerplate) [![Coverage Status](https://coveralls.io/repos/github/AlexanderWillner/python-boilerplate/badge.svg?branch=master)](https://coveralls.io/github/AlexanderWillner/python-boilerplate?branch=master) [![Scrutinizer Code Quality](https://scrutinizer-ci.com/g/AlexanderWillner/python-boilerplate/badges/quality-score.png?b=master)](https://scrutinizer-ci.com/g/AlexanderWillner/python-boilerplate/?branch=master)
+# ns0 - Container DNS
 
 ## Examples
 
@@ -47,23 +37,25 @@ tests/test_hello.py      12      0   100%
 TOTAL                    38      0   100%
 ```
 
-# Get Started
+## Get Started
 
-## Run ns0
+### Run ns0
+
 `docker run -v /var/run/docker.sock:/var/run/docker.sock registry.gitlab.com/peter.saarland/ns0:latest`
 
 Environment-Variables:
 
-- everything Lexicon supports
-- ...
+* everything Lexicon supports
+* ...
 
 To instruct `ns0` to handle DNS for a container, add these labels to the container or service:
 
 `ns0.host=sub.domain.tld.com`
 
-# Development
-- make sure `poetry` is installed
-- git clone + cd to project directory
-- `poetry shell`
-- `code .`
-- `poetry install`
+## Development
+
+* make sure `poetry` is installed
+* git clone + cd to project directory
+* `poetry shell`
+* `code .`
+* `poetry install`
