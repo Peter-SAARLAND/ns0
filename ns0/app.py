@@ -17,9 +17,10 @@ def main(args):
 
     while True:
         # ns0.providerUpdate()
+        ns0.guessEndpoints()
         ns0.update()
         ns0.clean()
-        logger.info(
+        logger.debug(
             "Sleeping for {}s".format(ns0.config.resolve("ns0:update_interval"))
         )
         time.sleep(ns0.config.resolve("ns0:update_interval"))

@@ -1,9 +1,11 @@
 import datetime
+import logging
 import os
 
 import dns.resolver
+import logzero
 import tldextract
-from config import ConfigResolver
+from config import ConfigResolver, DictConfigSource
 from lexicon import discovery
 from logzero import logger
 from providers.docker import Docker
@@ -14,6 +16,8 @@ TLDEXTRACT_CACHE_FILE_DEFAULT = os.path.join("~", ".lexicon_tld_set")
 TLDEXTRACT_CACHE_FILE = os.path.expanduser(
     os.environ.get("LEXICON_TLDEXTRACT_CACHE", TLDEXTRACT_CACHE_FILE_DEFAULT)
 )
+
+logzero.loglevel(logging.INFO)
 
 
 class NS0:
@@ -48,15 +52,11 @@ class NS0:
             "ttl": 0,
         },
     }
-    endpoints = {
-        "private": "127.0.0.1",
-        "public": "127.0.0.1",
-        "ddns": "127.0.0.1",
-        "local": "127.0.0.1",
-        "zerotier": "127.0.0.1",
-    }
 
-    default_config = {"ttl": 10, "update_interval": 10}
+    default_config = {
+        "ttl": 10,
+        "update_interval": 10,
+    }
 
     def __init__(self):
         logger.info("Initalizing ns0 ...")
@@ -64,23 +64,36 @@ class NS0:
         self.config = ConfigResolver()
         self.config.with_env().with_dict(self.default_config)
 
-        if self.config:
-            logger.info("✓ Loaded configuration from Envionment")
-        else:
-            logger.error("✗ Error loading configuration from Environment")
-
         # Guess available Endpoints
         # This includes Endpoints defined in the configuration
-        self.endpoints = self.guessEndpoints()
+        endpoints = self.guessEndpoints()
+        self.config.add_config_source(DictConfigSource(endpoints))
 
-        logger.info("✓ Discovered Endpoints:")
-        for endpoint in self.endpoints:
-            logger.info("✓ {}\t -> \t{}".format(endpoint, self.endpoints[endpoint]))
+        print(self.config.resolve("ns0:endpoints"))
+
+        if self.config:
+            logger.info("Loaded initial Configuration")
+        else:
+            logger.error("Error loading initial configuration")
+
+        logger.info("Available Endpoints:")
+
+        for endpoint in self.config.resolve("ns0:endpoints"):
+            logger.info(
+                "{}:\t{}".format(
+                    endpoint, self.config.resolve("ns0:endpoints:{}".format(endpoint))
+                )
+            )
 
         self.docker = Docker()
         self.update()
 
     def update(self):
+        # Guess Endpoints
+        endpoints = self.guessEndpoints()
+
+        self.config.add_config_source(DictConfigSource(endpoints))
+
         # Get latest Records from sources
         records = self.docker.getRecords()
 
@@ -120,13 +133,12 @@ class NS0:
                 treshhold = treshhold + (update_interval - ttl)
 
             # If TTL is 0, we don't expire the record
-            if (
-                ttl != 0
-                and int((now - self.records[record]["found"]).total_seconds())
-                >= ttl + treshhold
-            ):
+            delta = int((now - self.records[record]["found"]).total_seconds())
+            if ttl != 0 and delta >= (ttl + treshhold):
                 # Record is over its TTL
-                logger.warning("Record {} expired".format(record))
+                logger.warning(
+                    "Record {} expired. TTL: {}. Delta: {}".format(record, ttl, delta)
+                )
                 expired.append(record)
 
         deletion = self.deleteRecords(expired)
@@ -148,7 +160,13 @@ class NS0:
             guess = self.guessDomain(hostname)
             domain = "{}.{}".format(guess.domain, guess.suffix)
             name = guess.subdomain
-            provider_name = self.guessProvider(hostname)[0]
+
+            provider_name = ""
+            if "provider" in self.records[record_name]:
+                provider_name = self.records[record_name]["provider"]
+            else:
+                # Guess DNS provider from Hostname
+                provider_name = self.guessProvider(hostname)[0]
             endpoints = self.records[record_name]["endpoints"]
 
             # hostname should be deleted
@@ -171,31 +189,25 @@ class NS0:
                     self.endpoints[endpoint],  # content (e.g. endpoint IP)
                 )
 
-                delete_result = lex.execute()
-                if delete_result:
-                    # Remove Record from self.records
-                    try:
-                        del self.records[record]
-                        logger.debug(
-                            "✗ {}: Record {} deleted from Running Config".format(
-                                provider_name, record
-                            )
-                        )
-                    except KeyError:
-                        error = True
-                        logger.error(
-                            "✗ {}: Can't delete Record {} from Running Config".format(
-                                provider_name, record
-                            )
-                        )
-                        pass
-                    # deleted_record = self.records.pop(record, None)
-                    # print(deleted_record)
-                else:
-                    error = True
-                    logger.error(
-                        "✗ {}: failed to delete Record {} with Lexicon".format(
+                try:
+                    lex.execute()
+                    logger.debug(
+                        "{}: Record {} deleted from Running Config".format(
                             provider_name, record
+                        )
+                    )
+
+                    del self.records[record]
+                    logger.debug(
+                        "{}: Record {} deleted from Running Config".format(
+                            provider_name, record
+                        )
+                    )
+                except Exception as e:
+                    error = True
+                    logger.exception(
+                        "{}: failed to delete Record {} with Lexicon: {}".format(
+                            provider_name, record, e
                         )
                     )
 
@@ -226,7 +238,13 @@ class NS0:
                 guess = self.guessDomain(hostname)
                 domain = "{}.{}".format(guess.domain, guess.suffix)
                 name = guess.subdomain
-                provider_name = self.guessProvider(hostname)[0]
+                provider_name = ""
+                if "provider" in records[record_name]:
+                    provider_name = records[record_name]["provider"]
+                else:
+                    # Guess DNS provider from Hostname
+                    provider_name = self.guessProvider(hostname)[0]
+
                 endpoints = records[record_name]["endpoints"]
                 sources = records[record_name]["sources"]
                 found = datetime.datetime.now()
@@ -260,7 +278,7 @@ class NS0:
                                     provider_name, e
                                 )
                             )
-                    continue
+                        continue
 
                     # Check sources
                     # Loop over existing and new sources,
@@ -292,33 +310,48 @@ class NS0:
                     # We're invoking Lexicon to create a Record for each endpoint
                     # our Record specifies
                     for endpoint in endpoints:
-                        # Now we involve Lexicon
-                        # Lexicon works in an idempotent way already - it checks
-                        # if the record already exists before creating it
-                        # - at least this behaviour is required by the providers
-                        # That's why we can simply 'create' here, without further checks
-                        # provider_name, action, domain, name, type, content
-                        lex = LexiconClient(
-                            provider_name,  # provider_name
-                            "create",  # action
-                            domain,  # domain
-                            name,  # name
-                            "A",  # type
-                            self.endpoints[endpoint],  # content (e.g. endpoint IP)
-                        )
-
-                        create_result = lex.execute()
-                        if create_result:
-                            logger.debug(
-                                "✗ {}: Record {} added to Running Config".format(
-                                    provider_name, hostname
+                        for interface in self.config.resolve(
+                            "ns0:endpoints:{}".format(endpoint)
+                        ):
+                            # Now we involve Lexicon
+                            # Lexicon works in an idempotent way already - it checks
+                            # if the record already exists before creating it
+                            # - at least this behaviour is required by the providers
+                            # That's why we can simply 'create' here, without further
+                            # checks
+                            type = "A"
+                            if (
+                                self.config.resolve(
+                                    "ns0:endpoints:{}:{}".format(endpoint, interface)
                                 )
+                                == "ipv6"
+                            ):
+                                type = "AAAA"
+                            lex = LexiconClient(
+                                provider_name,  # provider_name
+                                "create",  # action
+                                domain,  # domain
+                                name,  # name
+                                type,  # type
+                                self.config.resolve(
+                                    "ns0:endpoints:{}:{}".format(endpoint, interface)
+                                ),  # content (e.g. endpoint IP)
                             )
-                        else:
+
+                        try:
+                            create_result = lex.execute()
+
+                            if create_result:
+                                logger.debug(
+                                    "{}: Record {} added to Running Config".format(
+                                        provider_name, hostname
+                                    )
+                                )
+                        except Exception as e:
                             error = True
-                            logger.error(
-                                "✗ {}: failed to create Record {} with Lexicon".format(
-                                    provider_name, hostname
+                            logger.exception(
+                                "{}: failed to create Record {} with Lexicon: {}".format(  # noqa: E501
+                                    provider_name, hostname, e
                                 )
                             )
 
@@ -334,27 +367,40 @@ class NS0:
         return tld
 
     def guessEndpoints(self):
-        endpoints = self.endpoints
+        endpoints = {
+            "private": {"ipv4": "127.0.0.1", "ipv6": "::1"},
+            "public": {"ipv4": "127.0.0.1", "ipv6": "::1"},
+            "ddns": {"ipv4": "127.0.0.1", "ipv6": "::1"},
+            "local": {"ipv4": "127.0.0.1", "ipv6": "::1"},
+            "zerotier": {"ipv4": "127.0.0.1", "ipv6": "::1"},
+        }
 
         # Private Endpoint
-        import socket
+        # Disabled for now, doesn't work in Docker
+        # import socket
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        private_ip = s.getsockname()[0]
-        endpoints["private"] = private_ip
-        s.close()
+        # s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # s.connect(("8.8.8.8", 80))
+        # private_ip = s.getsockname()[0]
+        # endpoints["private"] = {}
+        # endpoints["private"]["ipv4"] = private_ip
+        # s.close()
 
         # Public Endpoint (ddns)
         from requests import get
 
-        public_ip = get("https://api.ipify.org").text
-        endpoints["public"] = public_ip
-        endpoints["ddns"] = public_ip
+        public_ipv4 = get("https://api.ipify.org").text
+        public_ipv6 = get("https://api6.ipify.org").text
+        endpoints["public"] = {}
+        endpoints["ddns"] = {}
+        endpoints["public"]["ipv4"] = public_ipv4
+        endpoints["ddns"]["ipv4"] = public_ipv4
 
-        endpoints["local"] = "127.0.0.1"
+        if public_ipv6 and public_ipv6 != public_ipv4:
+            endpoints["public"]["ipv6"] = public_ipv6
+            endpoints["ddns"]["ipv6"] = public_ipv6
 
-        return endpoints
+        return {"endpoints": endpoints}
 
     def guessProvider(self, hostname):
         domain = self.guessDomain(hostname)

@@ -34,6 +34,7 @@ To instruct `ns0` to publish DNS-Records for a container, add these labels to th
 ```bash
 ns0.subdomain.hostname=sub.domain.tld.com
 ns0.subdomain.endpoints=public
+ns0.subdomain.provider=digitalocean (optional)
 ```
 
 ## Roadmap

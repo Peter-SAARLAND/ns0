@@ -3,6 +3,7 @@ stages:
   - build
   - test
   - release
+
 fetch-semantic-version:
   # Requires Node >= 10.13 version
   image: node:13
